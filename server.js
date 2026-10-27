@@ -10,7 +10,7 @@
  *     API Key 可由浏览器请求头携带 (x-xai-key), 也可由服务端环境变量 XAI_API_KEY 提供
  *
  * 环境变量:
- *  PORT          监听端口, 默认 3210
+ *  PORT          监听端口, 默认 8187
  *  XAI_API_KEY   服务端 API Key (可选, 前端未携带 Key 时启用)
  *  XAI_BASE_URL  上游 Base URL, 默认 https://api.x.ai
  */
@@ -51,7 +51,7 @@ function loadDotEnv() {
 loadDotEnv();
 
 const PORT = Number(process.env.PORT || 8187);
-const HOST = process.env.HOST || '127.0.0.1';
+const HOST = process.env.HOST || '0.0.0.0';
 const PUBLIC_DIR = path.join(__dirname, 'public');
 const XAI_BASE = (process.env.XAI_BASE_URL || 'https://api.x.ai').replace(/\/+$/, '');
 const ENV_KEY = process.env.XAI_API_KEY || '';
