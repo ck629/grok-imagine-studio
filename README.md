@@ -90,7 +90,7 @@ docker compose up -d                 # http://localhost:8187
 |---|---|---|
 | `XAI_API_KEY` | 否 | 服务端 Key。配置后团队成员无需各自填 Key（浏览器留空即用服务端 Key） |
 | `XAI_BASE_URL` | 否 | 上游地址，默认 `https://api.x.ai` |
-| `PORT` / `HOST` | 否 | 监听端口 `8187` / 地址 `127.0.0.1`（Docker 容器内为 `3210`） |
+| `PORT` / `HOST` | 否 | 监听端口 `8187` / 地址 `0.0.0.0`（Docker 容器内为 `3210`） |
 
 以上变量均支持写入项目根目录 `.env` 文件（参考 `.env.example`），启动时自动加载；命令行环境变量优先于 `.env`。`server.js`、`start.sh`、Docker 三种启动方式均生效。
 
