@@ -15,26 +15,26 @@ const MODES = {
   t2i: {
     label: '文生图', kind: 'image', api: '/api/images/generations', btn: '生成图像',
     imageUpload: null, keyframes: false, videoSource: false, refs: false, audios: false,
-    aspect: true, n: true, duration: null, format: true, promptRequired: true,
+    aspect: true, n: true, duration: null, format: true, quality: true, promptRequired: true,
     placeholder: '描述你想生成的画面…\n例如：一只机械风格的水母漂浮在霓虹城市上空，电影感光效，超高细节',
   },
   edit: {
     label: '图片编辑', kind: 'image', api: '/api/images/edits', btn: '开始编辑',
     imageUpload: { max: 5, label: '参考图（最多 5 张）', rule: '多图编辑时可在提示词里用 <IMAGE_0>、<IMAGE_1> 指代各图' },
     keyframes: false, videoSource: false, refs: false, audios: false,
-    aspect: true, n: true, duration: null, format: true, promptRequired: true,
+    aspect: true, n: true, duration: null, format: true, quality: true, promptRequired: true,
     placeholder: '描述要做的修改…\n例如：把背景换成黄昏的海滩，保留人物姿态和光影方向',
   },
   t2v: {
     label: '文生视频', kind: 'video', api: '/api/videos/generations', btn: '生成视频',
-    imageUpload: null, keyframes: false, videoSource: false, refs: true, audios: true,
+    imageUpload: null, keyframes: false, videoSource: false, refs: true, audios: true, lastFrame: true,
     aspect: true, n: false, duration: { min: 1, max: 15, def: 8 }, format: false, promptRequired: true,
     placeholder: '描述镜头：场景、运动、氛围…\n例如：航拍镜头缓缓推近雪山之巅，云海翻涌，日落金光洒在雪坡上',
   },
   i2v: {
     label: '图生视频', kind: 'video', api: '/api/videos/generations', btn: '生成视频',
     imageUpload: { max: 1, label: '首帧图片', rule: '作为视频首帧，PNG / JPG / WebP' },
-    keyframes: true, videoSource: false, refs: true, audios: true,
+    keyframes: true, videoSource: false, refs: true, audios: true, lastFrame: true,
     aspect: true, n: false, duration: { min: 1, max: 15, def: 8 }, format: false, promptRequired: false,
     placeholder: '描述这张画面的动态（可留空，仅按图片生成）…\n例如：镜头缓慢推近，头发随风飘动，背景虚化光斑流动',
   },
@@ -83,8 +83,8 @@ const state = {
   // 每个模式的输入数据
   modeData: {
     edit: { images: [] },
-    i2v: { images: [], keyframes: [], refs: [], audios: [], voiceIds: '' },
-    t2v: { refs: [], audios: [], voiceIds: '' },
+    i2v: { images: [], keyframes: [], refs: [], audios: [], voiceIds: '', lastFrame: null },
+    t2v: { refs: [], audios: [], voiceIds: '', lastFrame: null },
     vedit: { videoUrl: '', videoData: null, videoName: '' },
     vext: { videoUrl: '', videoData: null, videoName: '' },
   },
@@ -175,17 +175,54 @@ async function api(path, { method = 'GET', body } = {}) {
 
 /* ---------- 模型列表（来自官方 API） ---------- */
 
-function modelPriceText(model) {
-  let ticks = null;
-  if (Array.isArray(model.pricing) && model.pricing.length) {
-    const entry =
-      model.pricing.find((p) => p.quality === 'medium' && p.resolution === '1k') ||
-      model.pricing[0];
-    ticks = entry ? entry.price_per_image : null;
+// 质量档位（quality 存在但未写入 REST 文档，实际生效且影响计费）
+// 档位枚举不写死：从模型返回的 pricing 矩阵里提取
+function qualitiesForModel(model) {
+  const set = new Set();
+  if (Array.isArray(model?.pricing)) {
+    for (const p of model.pricing) if (p.quality) set.add(p.quality);
   }
-  if (ticks === null && typeof model.image_price === 'number') ticks = model.image_price;
-  const usd = ticks === null ? null : usdFromTicks(ticks);
-  return usd === null ? '' : `约 $${usd < 0.01 ? usd.toFixed(3) : usd.toFixed(2)} / 张`;
+  return [...set];
+}
+
+function renderQualityOptions() {
+  const sel = $('qualitySelect');
+  const model = state.models.image.find((m) => m.id === $('modelSelect').value);
+  const qualities = model ? qualitiesForModel(model) : [];
+
+  if (!qualities.length) {
+    sel.innerHTML = '<option value="">该模型无质量档位</option>';
+    sel.disabled = true;
+    return;
+  }
+
+  const order = { low: 0, medium: 1, high: 2 };
+  qualities.sort((a, b) => (order[a] ?? 9) - (order[b] ?? 9));
+
+  const prev = sel.value;
+  sel.innerHTML = '';
+  for (const q of qualities) {
+    const opt = document.createElement('option');
+    opt.value = q;
+    opt.textContent = q;
+    sel.appendChild(opt);
+  }
+  sel.disabled = false;
+  sel.value = qualities.includes(prev) ? prev : qualities.includes('medium') ? 'medium' : qualities[0];
+}
+
+function currentPriceEntry(model) {
+  if (!model) return null;
+  if (Array.isArray(model.pricing) && model.pricing.length) {
+    const q = $('qualitySelect').value;
+    const r = $('resSelect').value;
+    return (
+      model.pricing.find((p) => (!q || p.quality === q) && (!r || p.resolution === r)) ||
+      model.pricing.find((p) => (!q || p.quality === q)) ||
+      model.pricing[0]
+    );
+  }
+  return null;
 }
 
 async function loadModels({ silent = false } = {}) {
@@ -248,6 +285,7 @@ function renderModelSelect() {
     else state.selectedModel[kind] = sel.value;
   }
 
+  renderQualityOptions();
   renderPriceHint();
 }
 
@@ -260,7 +298,23 @@ function renderPriceHint() {
     return;
   }
   const model = state.models.image.find((m) => m.id === sel.value);
-  const text = model ? modelPriceText(model) : '';
+  if (!model) {
+    hintEl.hidden = true;
+    return;
+  }
+
+  const entry = currentPriceEntry(model);
+  let text = '';
+  if (entry) {
+    const usd = usdFromTicks(entry.price_per_image);
+    const parts = [];
+    if (entry.quality) parts.push(`quality=${entry.quality}`);
+    if (entry.resolution) parts.push(entry.resolution);
+    text = `$${usd.toFixed(3)} / 张${parts.length ? ` · ${parts.join(' · ')}` : ''}`;
+  } else if (typeof model.image_price === 'number') {
+    const usd = usdFromTicks(model.image_price);
+    text = `$${usd.toFixed(3)} / 张`;
+  }
   hintEl.textContent = text;
   hintEl.hidden = !text;
 }
@@ -287,9 +341,11 @@ function setMode(mode) {
     $('uploadRule').textContent = cfg.imageUpload.rule || '';
   }
   $('keyframesBlock').hidden = !cfg.keyframes;
+  $('lastFrameBlock').hidden = !cfg.lastFrame;
   $('videoSrcBlock').hidden = !cfg.videoSource;
   $('refsBlock').hidden = !cfg.refs;
   $('audiosBlock').hidden = !cfg.audios;
+  $('audioToggleRow').hidden = !(cfg.kind === 'video' && cfg.api.endsWith('/videos/generations'));
 
   // 几何参数（仅生成类端点支持）
   $('geomGrid').hidden = !cfg.aspect;
@@ -304,6 +360,7 @@ function setMode(mode) {
 
   $('nBlock').hidden = !cfg.n;
   $('formatBlock').hidden = !cfg.format;
+  $('qualityBlock').hidden = !cfg.quality;
 
   // 时长
   const d = cfg.duration;
@@ -373,6 +430,22 @@ function renderAllLists() {
 
   if (cfg.imageUpload) renderThumbList($('thumbs'), data.images);
   if (cfg.refs) renderThumbList($('refThumbs'), data.refs);
+
+  // 末帧（last_frame）单图
+  if (cfg.lastFrame) {
+    const box = $('lfThumbs');
+    box.innerHTML = '';
+    if (data.lastFrame) {
+      const div = document.createElement('div');
+      div.className = 'thumb';
+      div.innerHTML = `<img src="${data.lastFrame.dataUrl}" alt="" /><button class="rm" title="移除">✕</button>`;
+      div.querySelector('.rm').addEventListener('click', () => {
+        data.lastFrame = null;
+        renderAllLists();
+      });
+      box.appendChild(div);
+    }
+  }
 
   // 关键帧：图片 + 时间戳
   if (cfg.keyframes) {
@@ -557,6 +630,11 @@ function buildImageBody(model, prompt) {
   const res = $('resSelect').value;
   if (res) body.resolution = res;
 
+  // quality: 官方 REST 文档未列出，但实际生效并影响计费(如 image-2.0 的 low 档更便宜)
+  // 仅在该模型价目表存在质量档位时发送，避免无档位模型收到多余字段
+  const qualitySel = $('qualitySelect');
+  if (!qualitySel.disabled && qualitySel.value) body.quality = qualitySel.value;
+
   if (state.mode === 'edit') {
     if (data.images.length === 1) body.image = { url: data.images[0].dataUrl };
     else body.images = data.images.map((u) => ({ url: u.dataUrl }));
@@ -590,6 +668,11 @@ function buildVideoGenBody(model, prompt) {
       timestamp_s: k.ts,
     }));
   }
+  // 末帧锚定: image + last_frame 会在两帧之间插值
+  if (data.lastFrame) body.last_frame = { url: data.lastFrame.dataUrl };
+
+  // 音轨开关(默认 true)
+  body.generate_audio = $('generateAudioToggle').checked;
   if (data.refs && data.refs.length) {
     body.reference_images = data.refs.map((r) => ({ url: r.dataUrl }));
   }
@@ -639,7 +722,21 @@ async function onGenerate() {
   const cfg = currentModeCfg();
   const prompt = $('prompt').value.trim();
 
-  if (!prompt && cfg.promptRequired) {
+  // 视频生成: 只要带了 image / keyframes / last_frame / 参考图 / 语音, prompt 即可省略
+  let promptRequired = cfg.promptRequired;
+  if (cfg.api.endsWith('/videos/generations')) {
+    const d = md();
+    const hasAnyInput =
+      (d.images && d.images.length) ||
+      (d.keyframes && d.keyframes.length) ||
+      (d.refs && d.refs.length) ||
+      (d.audios && d.audios.length) ||
+      countVoiceIds() > 0 ||
+      d.lastFrame;
+    if (hasAnyInput) promptRequired = false;
+  }
+
+  if (!prompt && promptRequired) {
     toast('请填写提示词', 'error');
     $('prompt').focus();
     return;
@@ -1062,6 +1159,22 @@ function bindEvents() {
     renderAllLists();
   });
 
+  // 末帧锚定
+  bindDropzone($('lfDropzone'), async (files) => {
+    const file = files[0];
+    if (!file) return;
+    if (!/^image\/(png|jpeg|webp)$/.test(file.type)) {
+      toast('末帧仅支持 PNG / JPG / WebP', 'error');
+      return;
+    }
+    if (file.size > LIMITS.imageMb * 1024 * 1024) {
+      toast(`「${file.name}」超过 ${LIMITS.imageMb}MB`, 'error');
+      return;
+    }
+    md().lastFrame = { dataUrl: await readFileAsDataUrl(file), name: file.name };
+    renderAllLists();
+  });
+
   // 源视频（URL / 文件）
   $('videoUrlInput').addEventListener('change', (e) => {
     const url = e.target.value.trim();
@@ -1097,8 +1210,12 @@ function bindEvents() {
   });
   $('modelSelect').addEventListener('change', (e) => {
     state.selectedModel[modality()] = e.target.value;
+    renderQualityOptions();
     renderPriceHint();
   });
+  // 分辨率/质量变化时刷新价格提示
+  $('resSelect').addEventListener('change', renderPriceHint);
+  $('qualitySelect').addEventListener('change', renderPriceHint);
   $('refreshModels').addEventListener('click', () => {
     if (!hasKey()) {
       openSettings();

@@ -29,9 +29,14 @@
 
 ### 全部参数均有对应控件
 
-- 生成类：`prompt` / `model` / `n` / `aspect_ratio` / `resolution` / `response_format` / `duration`
-- 编辑类：`image` / `images`（多图 `<IMAGE_0>` 指代）/ `video` / `keyframes` / `reference_images` / `reference_audios`
+- 生成类：`prompt` / `model` / `n` / `aspect_ratio` / `resolution` / `quality` / `response_format` / `duration`
+- 编辑类：`image` / `images`（多图 `<IMAGE_0>` 指代）/ `video` / `keyframes` / `last_frame` / `reference_images` / `reference_audios`
+- 视频生成专属：`last_frame`（末帧锚定，图生视频时与首帧插值）、`generate_audio`（音轨开关，默认开）、`keyframes`（≤4 个，1/3 秒网格）、`reference_images`（≤14）、`reference_audios`（≤3 条，音频文件或 `voice_id`）
 - 高级参数面板：`deferred`（图像异步模式，自动联动 url 格式并轮询 `GET /v1/images/{request_id}`）、`user`（终端用户标识）、`output`（签名 PUT 上传地址）、`storage_options`（filename / expires_after ≤30天 / public_url，存入 xAI Files）
+
+> **关于 `quality`**：REST 文档与 OpenAPI 规范里都没有这个字段，但实测确实生效并影响计费——`grok-imagine-image-2.0` 传 `quality=low` + 1k 计费 $0.0400，不传（默认 medium）为 $0.0600。UI 的质量下拉不写死枚举，直接从模型返回的 `pricing` 矩阵提取档位，并实时显示当前档位 × 分辨率的单张价格。
+
+> 已知未覆盖：`image` / `images` / `video` 的 `file_id` 形式（需接入 xAI Files API 上传链路），当前统一使用公开 URL 或 base64 data URL。
 
 ### 工作流
 
