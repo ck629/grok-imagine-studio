@@ -91,8 +91,24 @@ docker compose up -d                 # http://localhost:8187
 | `XAI_API_KEY` | 否 | 服务端 Key。配置后团队成员无需各自填 Key（浏览器留空即用服务端 Key） |
 | `XAI_BASE_URL` | 否 | 上游地址，默认 `https://api.x.ai` |
 | `PORT` / `HOST` | 否 | 监听端口 `8187` / 地址 `0.0.0.0`（Docker 容器内为 `3210`） |
+| `HTTPS_PROXY` 等 | 否 | 出站代理，见下节 |
 
 以上变量均支持写入项目根目录 `.env` 文件（参考 `.env.example`），启动时自动加载；命令行环境变量优先于 `.env`。`server.js`、`start.sh`、Docker 三种启动方式均生效。
+
+## 出站代理
+
+服务端访问 `api.x.ai` 需要走代理时，在 `.env` 中配置即可（零依赖实现，仅作用于服务端到上游的请求，不影响浏览器访问本服务）：
+
+```bash
+# HTTP 代理 (https 目标自动走 CONNECT 隧道, 可带认证)
+HTTPS_PROXY=http://127.0.0.1:7890
+# SOCKS5 代理 (socks5h 由代理解析 DNS, 推荐; 可带认证)
+HTTPS_PROXY=socks5h://127.0.0.1:1080
+# 免代理主机
+NO_PROXY=localhost,127.0.0.1
+```
+
+支持 `HTTPS_PROXY` → `HTTP_PROXY` → `ALL_PROXY` 逐级兜底（小写同名变量同样有效）。启动日志会打印已启用的代理（密码自动脱敏）。
 
 ## 架构与安全
 
@@ -114,6 +130,7 @@ grok-imagine-studio/
 ├── Dockerfile          # Docker 部署
 ├── docker-compose.yml  # docker compose 一条命令部署
 ├── server.js           # 零依赖 Node 服务器：静态托管 + xAI API 白名单代理 + .env 加载
+├── proxy.js            # 零依赖出站代理：HTTP CONNECT / SOCKS5，含超时与断连保护
 ├── package.json
 └── public/
     ├── index.html      # 界面骨架（六模式 + 全参数面板）

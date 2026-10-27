@@ -13,13 +13,14 @@
  *  PORT          监听端口, 默认 8187
  *  XAI_API_KEY   服务端 API Key (可选, 前端未携带 Key 时启用)
  *  XAI_BASE_URL  上游 Base URL, 默认 https://api.x.ai
+ *  HTTPS_PROXY / HTTP_PROXY / ALL_PROXY / NO_PROXY  出站代理(详见 .env.example)
  */
 
 const http = require('http');
 const fs = require('fs/promises');
 const fsSync = require('fs');
 const path = require('path');
-const { Readable } = require('stream');
+const { proxyFetch, describeProxy } = require('./proxy');
 
 /* ---------- .env 自动加载（零依赖实现） ----------
  * 启动时读取项目目录下的 .env 文件, 已存在的环境变量优先, 不覆盖
@@ -115,18 +116,14 @@ function readJsonBody(req) {
 
 async function pipeUpstream(res, upstream) {
   const headers = {
-    'Content-Type': upstream.headers.get('content-type') || 'application/json; charset=utf-8',
+    'Content-Type': upstream.headers['content-type'] || 'application/json; charset=utf-8',
     'Cache-Control': 'no-store',
   };
   res.writeHead(upstream.status, headers);
-  if (!upstream.body) {
+  if (upstream.stream) {
+    upstream.stream.pipe(res);
+  } else {
     res.end();
-    return;
-  }
-  try {
-    Readable.fromWeb(upstream.body).pipe(res);
-  } catch {
-    res.end(await upstream.text());
   }
 }
 
@@ -168,7 +165,6 @@ async function handleApi(req, res, url) {
       'Content-Type': 'application/json',
       Accept: 'application/json',
     },
-    signal: AbortSignal.timeout(UPSTREAM_TIMEOUT_MS),
   };
 
   if (req.method === 'POST') {
@@ -183,7 +179,7 @@ async function handleApi(req, res, url) {
 
   let upstream;
   try {
-    upstream = await fetch(upstreamUrl, init);
+    upstream = await proxyFetch(upstreamUrl, { ...init, timeoutMs: UPSTREAM_TIMEOUT_MS });
   } catch (err) {
     return sendJson(res, 502, {
       error: { code: 'upstream_unreachable', message: `无法连接 xAI API: ${err.message}` },
@@ -244,5 +240,7 @@ server.listen(PORT, HOST, () => {
   console.log(`  地址:     http://${HOST}:${PORT}`);
   console.log(`  上游:     ${XAI_BASE}`);
   console.log(`  服务端Key: ${ENV_KEY ? '已配置 (XAI_API_KEY)' : '未配置 (请在页面设置中填写)'}`);
+  const proxyInfo = describeProxy();
+  if (proxyInfo) console.log(`  出站代理: ${proxyInfo}`);
   console.log('');
 });
