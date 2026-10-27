@@ -1,0 +1,5 @@
+# 密钥文件, 切勿提交
+.env
+
+node_modules/
+npm-debug.log

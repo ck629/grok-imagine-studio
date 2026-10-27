@@ -1,0 +1,14 @@
+services:
+  grok-imagine-studio:
+    build: .
+    container_name: grok-imagine-studio
+    ports:
+      - "8187:3210"
+    environment:
+      # 容器内监听 3210, 映射到宿主机 8187
+      - XAI_API_KEY=${XAI_API_KEY:-}
+    # 若项目目录存在 .env 文件, 其中的变量会自动注入容器 (server.js 也会在容器内读取)
+    env_file:
+      - path: .env
+        required: false
+    restart: unless-stopped

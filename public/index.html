@@ -1,0 +1,228 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Grok Imagine Studio</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%230a0a0b'/%3E%3Cpath d='M18 46 32 16l14 30H38l-6-13-6 13z' fill='%237c5cff'/%3E%3C/svg%3E" />
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">
+      <div class="brand-mark">G</div>
+      <div class="brand-text">
+        <span class="brand-name">Grok Imagine Studio</span>
+        <span class="brand-sub">xAI Imagine API 工作台</span>
+      </div>
+    </div>
+
+    <nav class="mode-tabs" id="modeTabs">
+      <button class="mode-tab active" data-mode="t2i">文生图</button>
+      <button class="mode-tab" data-mode="edit">图片编辑</button>
+      <button class="mode-tab" data-mode="t2v">文生视频</button>
+      <button class="mode-tab" data-mode="i2v">图生视频</button>
+      <button class="mode-tab" data-mode="vedit">视频编辑</button>
+      <button class="mode-tab" data-mode="vext">视频延展</button>
+    </nav>
+
+    <div class="topbar-right">
+      <span class="conn" id="connStatus"><span class="conn-dot"></span><span id="connText">未连接</span></span>
+      <button class="btn ghost" id="settingsBtn" title="API 设置">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+        设置
+      </button>
+    </div>
+  </header>
+
+  <main class="layout">
+    <!-- ============ 左侧控制面板 ============ -->
+    <aside class="panel">
+      <div class="panel-block">
+        <label class="field-label" for="prompt">提示词</label>
+        <textarea id="prompt" rows="4" placeholder="描述你想生成的画面…"></textarea>
+        <div class="prompt-foot">
+          <span id="promptHint" class="hint"></span>
+          <span class="hint" id="promptCount">0</span>
+        </div>
+      </div>
+
+      <!-- 参考图（图片编辑 / 图生视频首帧） -->
+      <div class="panel-block" id="uploadBlock" hidden>
+        <label class="field-label" id="uploadLabel">参考图</label>
+        <div class="dropzone" id="dropzone">
+          <input type="file" id="fileInput" accept="image/png,image/jpeg,image/webp" multiple hidden />
+          <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+          <span>拖拽 / 点击 / 粘贴 上传图片</span>
+          <span class="hint" id="uploadRule"></span>
+        </div>
+        <div class="thumbs" id="thumbs"></div>
+      </div>
+
+      <!-- 关键帧（图生视频） -->
+      <div class="panel-block" id="keyframesBlock" hidden>
+        <label class="field-label">关键帧 <span class="hint-inline">最多 4 个，锚定中间画面</span></label>
+        <button class="btn ghost small" id="addKeyframe" type="button">＋ 添加关键帧</button>
+        <input type="file" id="kfInput" accept="image/png,image/jpeg,image/webp" hidden />
+        <div id="kfList"></div>
+      </div>
+
+      <!-- 源视频（视频编辑 / 视频延展） -->
+      <div class="panel-block" id="videoSrcBlock" hidden>
+        <label class="field-label">源视频 <span class="hint-inline">.mp4，2–15 秒</span></label>
+        <input type="text" id="videoUrlInput" placeholder="或粘贴公开 .mp4 链接…" spellcheck="false" />
+        <div class="dropzone" id="videoDropzone">
+          <input type="file" id="videoInput" accept="video/mp4" hidden />
+          <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><polygon points="23 7 16 12 23 17 23 7"/><rect x="1" y="5" width="15" height="14" rx="2"/></svg>
+          <span>拖拽 / 点击上传本地 mp4</span>
+        </div>
+        <div id="videoPreview"></div>
+      </div>
+
+      <!-- 参考图 R2V（文生视频 / 图生视频） -->
+      <div class="panel-block" id="refsBlock" hidden>
+        <label class="field-label">参考图 <span class="hint-inline">锁定角色 / 场景 / 风格，最多 14 张</span></label>
+        <div class="dropzone" id="refDropzone">
+          <input type="file" id="refInput" accept="image/png,image/jpeg,image/webp" multiple hidden />
+          <span>拖拽 / 点击上传参考图</span>
+        </div>
+        <div class="thumbs" id="refThumbs"></div>
+      </div>
+
+      <!-- 语音参考（文生视频 / 图生视频） -->
+      <div class="panel-block" id="audiosBlock" hidden>
+        <label class="field-label">语音参考 <span class="hint-inline">最多 3 条，每条 ≤15 秒</span></label>
+        <div class="dropzone" id="audioDropzone">
+          <input type="file" id="audioInput" accept="audio/*" multiple hidden />
+          <span>拖拽 / 点击上传音频（声音身份）</span>
+        </div>
+        <div id="audioList"></div>
+        <input type="text" id="voiceIdInput" placeholder="或使用预设 voice_id（如 ara），逗号分隔多个" spellcheck="false" />
+      </div>
+
+      <div class="panel-block">
+        <label class="field-label" for="modelSelect">模型</label>
+        <div class="model-row">
+          <select id="modelSelect"></select>
+          <button class="btn ghost icon-btn" id="refreshModels" title="从官方 API 刷新模型列表">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>
+          </button>
+        </div>
+        <div class="hint">下拉选项来自官方 API，未写死任何模型名</div>
+        <div class="hint" id="priceHint" hidden></div>
+      </div>
+
+      <div class="grid-2" id="geomGrid">
+        <div class="panel-block">
+          <label class="field-label" for="aspectSelect">宽高比</label>
+          <select id="aspectSelect"></select>
+        </div>
+        <div class="panel-block">
+          <label class="field-label" for="resSelect">分辨率</label>
+          <select id="resSelect"></select>
+        </div>
+      </div>
+
+      <div class="panel-block" id="nBlock" hidden>
+        <label class="field-label" for="nInput">生成数量 <span class="hint-inline">1 – 10 张</span></label>
+        <input type="number" id="nInput" min="1" max="10" step="1" value="1" />
+      </div>
+
+      <div class="panel-block" id="durationBlock" hidden>
+        <label class="field-label" for="durationInput"><span id="durationLabel">时长</span> <span class="hint-inline" id="durationVal">8 秒</span></label>
+        <input type="range" id="durationInput" min="1" max="15" step="1" value="8" />
+      </div>
+
+      <div class="panel-block" id="formatBlock" hidden>
+        <label class="field-label" for="formatSelect">返回格式 <span class="hint-inline">b64 更稳定</span></label>
+        <select id="formatSelect">
+          <option value="b64_json" selected>b64_json（推荐）</option>
+          <option value="url">url（临时链接）</option>
+        </select>
+      </div>
+
+      <!-- ============ 高级参数（对应 API 完整字段） ============ -->
+      <details class="advanced" id="advancedBlock">
+        <summary>高级参数 <span class="hint-inline">对应 API 全部可选字段</span></summary>
+        <div class="advanced-body">
+          <div class="panel-block" id="deferredRow" hidden>
+            <label class="check-row">
+              <input type="checkbox" id="deferredToggle" />
+              <span>deferred 异步模式 <span class="hint-inline">需 url 格式，提交后轮询</span></span>
+            </label>
+          </div>
+          <div class="panel-block">
+            <label class="field-label" for="userIdInput">user <span class="hint-inline">终端用户标识（可选）</span></label>
+            <input type="text" id="userIdInput" placeholder="如 user-123，用于 xAI 滥用监控" spellcheck="false" />
+          </div>
+          <div class="panel-block">
+            <label class="field-label" for="outputUrls">output 上传地址 <span class="hint-inline">签名 PUT URL（可选）</span></label>
+            <textarea id="outputUrls" rows="2" spellcheck="false" placeholder=""></textarea>
+            <div class="hint" id="outputUrlsHint"></div>
+          </div>
+          <div class="panel-block">
+            <label class="field-label">storage_options <span class="hint-inline">存入 xAI Files（可选）</span></label>
+            <input type="text" id="storageFilename" placeholder="filename 文件名" spellcheck="false" />
+            <input type="number" id="storageExpires" min="60" max="2592000" step="1" placeholder="expires_after 秒后过期（≤30天，留空不过期）" />
+            <label class="check-row">
+              <input type="checkbox" id="storagePublic" />
+              <span>public_url 创建公开链接</span>
+            </label>
+          </div>
+        </div>
+      </details>
+
+      <button class="btn primary generate-btn" id="generateBtn">
+        <span id="generateBtnText">生成图像</span>
+      </button>
+
+      <div class="hint foot-note" id="serverKeyNote" hidden>服务端已配置 XAI_API_KEY，本设备可不填 Key。</div>
+    </aside>
+
+    <!-- ============ 右侧结果区 ============ -->
+    <section class="results-wrap">
+      <div class="results-head">
+        <h2>生成结果</h2>
+        <button class="btn ghost small" id="clearResults">清空</button>
+      </div>
+      <div class="results-grid" id="resultsGrid">
+        <div class="empty-state" id="emptyState">
+          <div class="empty-icon">
+            <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="3"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="m21 15-5-5L5 21"/></svg>
+          </div>
+          <p>还没有内容</p>
+          <p class="hint">写一条提示词，点击左侧生成按钮开始 · 结果可作为下一轮编辑/视频的输入</p>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <!-- ============ 设置弹窗 ============ -->
+  <div class="modal-mask" id="settingsModal" hidden>
+    <div class="modal">
+      <div class="modal-head">
+        <h3>API 设置</h3>
+        <button class="btn ghost icon-btn" id="closeSettings" title="关闭">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+        </button>
+      </div>
+      <div class="modal-body">
+        <div class="panel-block">
+          <label class="field-label" for="keyInput">xAI API Key</label>
+          <input type="password" id="keyInput" placeholder="xai-..." autocomplete="off" spellcheck="false" />
+          <div class="hint">仅保存在本浏览器 localStorage，请求时经本机代理转发至 api.x.ai，不会上传到任何第三方。</div>
+        </div>
+        <div class="hint" id="serverKeyHint"></div>
+      </div>
+      <div class="modal-foot">
+        <button class="btn ghost" id="testKeyBtn">测试连接</button>
+        <button class="btn primary" id="saveKeyBtn">保存并加载模型</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="toasts" id="toasts"></div>
+
+  <script src="app.js"></script>
+</body>
+</html>

@@ -1,0 +1,122 @@
+# Grok Imagine Studio
+
+参考 ImgX Studio 设计的自托管 **xAI Grok Imagine API** 创作工作台。零依赖、单进程 Node 服务，开箱即用。
+
+## 功能（覆盖 Imagine API 全部能力与参数）
+
+| 模式 | 说明 | 对应官方端点 |
+|---|---|---|
+| 文生图 | 提示词生成图像，1–10 张 | `POST /v1/images/generations` |
+| 图片编辑 | 最多 5 张参考图 + 自然语言修改 | `POST /v1/images/edits` |
+| 文生视频 | 提示词生成，1–15 秒 | `POST /v1/videos/generations` |
+| 图生视频 | 首帧图 + 关键帧锚定（最多 4 个，含 timestamp_s） | `POST /v1/videos/generations` |
+| 视频编辑 | 上传 / 引用源 mp4 + 文字修改 | `POST /v1/videos/edits` |
+| 视频延展 | 从源视频最后一帧续写 2–10 秒 | `POST /v1/videos/extensions` |
+
+**模型下拉不写死任何模型名**：页面加载时实时调用官方模型列表接口填充：
+
+- `GET /v1/image-generation-models`
+- `GET /v1/video-generation-models`
+
+新模型上线即自动出现在下拉框中；图像模型还会展示官方返回的每张价格。
+
+### 参考生视频（R2V）与语音
+
+文生视频 / 图生视频模式下可附加：
+
+- **参考图**（`reference_images`，最多 14 张）：锁定角色、场景、产品或风格
+- **语音参考**（`reference_audios`，最多 3 条，每条 ≤15s）：上传音频文件作为声音身份，或直接填预设 `voice_id`（如 `ara`）
+
+### 全部参数均有对应控件
+
+- 生成类：`prompt` / `model` / `n` / `aspect_ratio` / `resolution` / `response_format` / `duration`
+- 编辑类：`image` / `images`（多图 `<IMAGE_0>` 指代）/ `video` / `keyframes` / `reference_images` / `reference_audios`
+- 高级参数面板：`deferred`（图像异步模式，自动联动 url 格式并轮询 `GET /v1/images/{request_id}`）、`user`（终端用户标识）、`output`（签名 PUT 上传地址）、`storage_options`（filename / expires_after ≤30天 / public_url，存入 xAI Files）
+
+### 工作流
+
+- 拖拽 / 点击 / 粘贴上传；关键帧可设定锚定时间点
+- 生成结果一键 **用作编辑源图 / 设为视频首帧 / 编辑此视频 / 延展此视频**，持续迭代
+- 视频与 deferred 图像任务实时进度条；每次请求显示实际费用（`usage.cost_in_usd_ticks`）
+- API Key 仅存本机浏览器 localStorage，经本机代理转发，不会上传第三方
+
+## 快速开始
+
+### 方式一：一键脚本（推荐）
+
+要求 Node.js ≥ 18（内置 fetch），无任何 npm 依赖。
+
+```bash
+cd grok-imagine-studio
+./start.sh
+```
+
+脚本会自动定位 Node、校验版本并启动，默认端口 **8187**。
+
+**配置持久化（推荐）**：复制 `.env.example` 为 `.env` 并填入 Key，启动时自动加载，无需每次输入环境变量：
+
+```bash
+cp .env.example .env
+# 编辑 .env: XAI_API_KEY=xai-xxx
+./start.sh
+```
+
+优先级：命令行环境变量 > `.env` 文件 > 默认值。也可临时覆盖：
+
+```bash
+PORT=9000 ./start.sh                    # 自定义端口
+XAI_API_KEY=xai-xxx ./start.sh          # 临时指定服务端 Key
+```
+
+打开 http://127.0.0.1:8187 ，若 `.env` 未配 Key，点击右上角 **设置** 填入 xAI API Key（在 console.x.ai 创建）。
+
+### 方式二：直接运行
+
+```bash
+node server.js
+```
+
+### 方式三：Docker
+
+```bash
+docker compose up -d                 # http://localhost:8187
+```
+
+项目目录存在 `.env` 时会自动注入容器（需 `required: false` 语法，docker compose v2.24+）；旧版 compose 请改用 `docker compose --env-file .env up -d` 或 `docker run --env-file .env`。
+
+## 配置
+
+| 环境变量 | 必填 | 说明 |
+|---|---|---|
+| `XAI_API_KEY` | 否 | 服务端 Key。配置后团队成员无需各自填 Key（浏览器留空即用服务端 Key） |
+| `XAI_BASE_URL` | 否 | 上游地址，默认 `https://api.x.ai` |
+| `PORT` / `HOST` | 否 | 监听端口 `8187` / 地址 `127.0.0.1`（Docker 容器内为 `3210`） |
+
+以上变量均支持写入项目根目录 `.env` 文件（参考 `.env.example`），启动时自动加载；命令行环境变量优先于 `.env`。`server.js`、`start.sh`、Docker 三种启动方式均生效。
+
+## 架构与安全
+
+```
+浏览器 ──> server.js（本机代理，白名单路由） ──> https://api.x.ai/v1/...
+```
+
+- 代理仅转发固定的 8 条路由 + 2 条轮询路由，不会成为任意 URL 的开放代理
+- 浏览器直连 api.x.ai 存在 CORS 限制，因此所有请求经本服务转发
+- API Key 优先级：浏览器请求头 `x-xai-key` > 服务端环境变量
+- 图像默认使用 `b64_json` 返回格式，避免临时 URL 过期导致结果丢失
+
+## 目录结构
+
+```
+grok-imagine-studio/
+├── start.sh            # 一键启动（自动找 Node、校验版本、提示 .env）
+├── .env.example        # 配置模板（复制为 .env 填 Key，自动加载）
+├── Dockerfile          # Docker 部署
+├── docker-compose.yml  # docker compose 一条命令部署
+├── server.js           # 零依赖 Node 服务器：静态托管 + xAI API 白名单代理 + .env 加载
+├── package.json
+└── public/
+    ├── index.html      # 界面骨架（六模式 + 全参数面板）
+    ├── style.css       # 深色工作台主题
+    └── app.js          # 模式逻辑 / 动态模型下拉 / 异步轮询 / 迭代操作
+```

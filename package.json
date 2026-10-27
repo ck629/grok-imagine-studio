@@ -1,0 +1,14 @@
+{
+  "name": "grok-imagine-studio",
+  "version": "1.0.0",
+  "private": true,
+  "description": "自托管的 xAI Grok Imagine API 创作工作台：文生图 / 图片编辑 / 文生视频 / 图生视频，模型列表实时来自官方 API",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "dependencies": {}
+}
