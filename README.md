@@ -81,14 +81,6 @@ XAI_API_KEY=xai-xxx ./start.sh          # 临时指定服务端 Key
 node server.js
 ```
 
-### 方式三：Docker
-
-```bash
-docker compose up -d                 # http://localhost:8187
-```
-
-项目目录存在 `.env` 时会自动注入容器（需 `required: false` 语法，docker compose v2.24+）；旧版 compose 请改用 `docker compose --env-file .env up -d` 或 `docker run --env-file .env`。
-
 ## 配置
 
 | 环境变量 | 必填 | 说明 |
@@ -141,20 +133,3 @@ NO_PROXY=localhost,127.0.0.1
 - 浏览器直连 api.x.ai 存在 CORS 限制，因此所有请求经本服务转发
 - API Key 优先级：浏览器请求头 `x-xai-key` > 服务端环境变量
 - 图像默认使用 `b64_json` 返回格式，避免临时 URL 过期导致结果丢失
-
-## 目录结构
-
-```
-grok-imagine-studio/
-├── start.sh            # 一键启动（自动找 Node、校验版本、提示 .env）
-├── .env.example        # 配置模板（复制为 .env 填 Key，自动加载）
-├── Dockerfile          # Docker 部署
-├── docker-compose.yml  # docker compose 一条命令部署
-├── server.js           # 零依赖 Node 服务器：静态托管 + xAI API 白名单代理 + .env 加载
-├── proxy.js            # 零依赖出站代理：HTTP CONNECT / SOCKS5，含超时与断连保护
-├── package.json
-└── public/
-    ├── index.html      # 界面骨架（六模式 + 全参数面板）
-    ├── style.css       # 深色工作台主题
-    └── app.js          # 模式逻辑 / 动态模型下拉 / 异步轮询 / 迭代操作
-```
