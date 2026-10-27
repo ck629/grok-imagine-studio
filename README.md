@@ -110,6 +110,22 @@ NO_PROXY=localhost,127.0.0.1
 
 支持 `HTTPS_PROXY` → `HTTP_PROXY` → `ALL_PROXY` 逐级兜底（小写同名变量同样有效）。启动日志会打印已启用的代理（密码自动脱敏）。
 
+### 连不上 xAI 时怎么排查
+
+浏览器打开 `http://<你的地址>:8187/api/diag`，会返回当前代理配置、上游状态码与耗时：
+
+```json
+{"ok":true,"proxy":"http://127.0.0.1:7890","upstreamStatus":401,"ms":756,
+ "sample":"{\"code\":\"unauthenticated:no-credentials\"}"}
+```
+
+- `upstreamStatus: 401` 表示**网络已通**（401 只是没带 Key，属正常）
+- `ok:false` + `error` 会给出具体原因，常见情况：
+  - `代理 CONNECT 失败: HTTP/1.1 403/407` → 代理拒绝该目标或需要认证（用 `http://user:pass@host:port`）
+  - `代理地址格式无法解析` → 缺少协议头，写全 `http://` 或 `socks5h://`
+  - `请求超时` → 代理未运行 / 端口不对 / 不支持 CONNECT（Clash 混合端口 7890 同时支持 HTTP 与 SOCKS）
+- `NO_PROXY` 误配也会导致直连（如设了 `*`）
+
 ## 架构与安全
 
 ```

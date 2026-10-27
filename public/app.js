@@ -194,7 +194,15 @@ async function loadModels({ silent = false } = {}) {
     api('/api/video-generation-models'),
   ]);
 
-  const pick = (r) => (r.status === 'fulfilled' ? r.value?.data || r.value || [] : []);
+  // 官方返回结构为 { models: [...] }（部分端点/版本为 { data: [...] }），统一归一化
+  const pick = (r) => {
+    if (r.status !== 'fulfilled') return [];
+    const v = r.value;
+    if (Array.isArray(v)) return v;
+    if (Array.isArray(v?.data)) return v.data;
+    if (Array.isArray(v?.models)) return v.models;
+    return [];
+  };
   state.models.image = pick(imgRes);
   state.models.video = pick(vidRes);
 
@@ -224,7 +232,9 @@ function renderModelSelect() {
   if (!hasKey()) {
     sel.innerHTML = '<option value="">请先在设置中填写 API Key</option>';
   } else if (!models.length) {
-    sel.innerHTML = '<option value="">未获取到模型（点击 ↻ 重试）</option>';
+    sel.innerHTML = kind === 'video'
+      ? '<option value="">当前 Key 无可用视频模型（该能力可能未开通）</option>'
+      : '<option value="">未获取到模型（点击 ↻ 重试）</option>';
   } else {
     for (const m of models) {
       const opt = document.createElement('option');
@@ -939,12 +949,17 @@ function openSettings() {
   $('serverKeyHint').textContent = state.serverHasKey
     ? '当前服务端已配置 XAI_API_KEY 环境变量，此处留空即可直接使用服务端 Key。'
     : '服务端未配置 XAI_API_KEY 环境变量，请在此填写你自己的 Key。';
-  $('settingsModal').hidden = false;
+  const modal = $('settingsModal');
+  modal.hidden = false;
+  // 双保险: 不依赖 CSS 对 [hidden] 的处理, 显式控制显示
+  modal.style.display = 'grid';
   $('keyInput').focus();
 }
 
 function closeSettings() {
-  $('settingsModal').hidden = true;
+  const modal = $('settingsModal');
+  modal.hidden = true;
+  modal.style.display = 'none';
 }
 
 async function saveKey() {

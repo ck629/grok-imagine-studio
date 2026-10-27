@@ -70,15 +70,19 @@ const MIME_TYPES = {
 };
 
 // 仅代理这些路径, 防止变成任意 URL 的开放代理
-const PROXY_ROUTES = {
-  'GET  /api/image-generation-models': true,
-  'GET  /api/video-generation-models': true,
-  'POST /api/images/generations': true,
-  'POST /api/images/edits': true,
-  'POST /api/videos/generations': true,
-  'POST /api/videos/edits': true,
-  'POST /api/videos/extensions': true,
-};
+// 统一归一化为 "METHOD /path"(单空格), 避免空白差异导致路由失效
+const PROXY_ROUTES = new Set([
+  'GET /api/image-generation-models',
+  'GET /api/video-generation-models',
+  'POST /api/images/generations',
+  'POST /api/images/edits',
+  'POST /api/videos/generations',
+  'POST /api/videos/edits',
+  'POST /api/videos/extensions',
+].map((s) => s.replace(/\s+/g, ' ').trim()));
+
+// /api/videos/{request_id} 与 /api/images/{request_id} 轮询 (GET, 动态段)
+const POLL_ROUTE = /^GET \/api\/(videos|images)\/[\w-]+$/;
 
 function sendJson(res, status, payload) {
   const body = JSON.stringify(payload);
@@ -128,20 +132,48 @@ async function pipeUpstream(res, upstream) {
 }
 
 async function handleApi(req, res, url) {
-  const route = `${req.method}  ${url.pathname}`;
+  const route = `${req.method} ${url.pathname}`.replace(/\s+/g, ' ');
 
-  if (route === 'GET  /api/health') {
+  if (route === 'GET /api/health') {
     return sendJson(res, 200, {
       hasServerKey: Boolean(ENV_KEY),
       base: XAI_BASE,
+      proxy: describeProxy(),
       version: '1.0.0',
     });
   }
 
-  // /api/videos/{request_id} 与 /api/images/{request_id} 轮询 (GET, 动态段)
-  const isVideoPoll = req.method === 'GET' && /^\/api\/videos\/[\w-]+$/.test(url.pathname);
-  const isImagePoll = req.method === 'GET' && /^\/api\/images\/[\w-]+$/.test(url.pathname);
-  if (!PROXY_ROUTES[route] && !isVideoPoll && !isImagePoll) {
+  // 连通性自检: 经当前代理配置探测上游, 无需 Key
+  if (route === 'GET /api/diag') {
+    const target = `${XAI_BASE}/v1/models`;
+    const started = Date.now();
+    const proxy = describeProxy();
+    try {
+      const r = await proxyFetch(target, { timeoutMs: 15000 });
+      const chunks = [];
+      for await (const c of r.stream) chunks.push(c);
+      const body = Buffer.concat(chunks).toString();
+      return sendJson(res, 200, {
+        ok: true,
+        target,
+        proxy: proxy || '未配置 (直连)',
+        upstreamStatus: r.status,
+        ms: Date.now() - started,
+        sample: body.slice(0, 300),
+      });
+    } catch (err) {
+      return sendJson(res, 200, {
+        ok: false,
+        target,
+        proxy: proxy || '未配置 (直连)',
+        error: err.message,
+        ms: Date.now() - started,
+      });
+    }
+  }
+
+  // 动态轮询段: /api/videos/{id} · /api/images/{id}
+  if (!PROXY_ROUTES.has(route) && !POLL_ROUTE.test(route)) {
     return sendJson(res, 404, { error: { code: 'not_found', message: `未知接口: ${route}` } });
   }
 
@@ -181,8 +213,17 @@ async function handleApi(req, res, url) {
   try {
     upstream = await proxyFetch(upstreamUrl, { ...init, timeoutMs: UPSTREAM_TIMEOUT_MS });
   } catch (err) {
+    const proxyInfo = describeProxy();
+    console.error(
+      `[upstream] ${req.method} ${url.pathname} 失败: ${err.message}` +
+      (proxyInfo ? ` (经代理 ${proxyInfo})` : ' (直连)')
+    );
     return sendJson(res, 502, {
-      error: { code: 'upstream_unreachable', message: `无法连接 xAI API: ${err.message}` },
+      error: {
+        code: 'upstream_unreachable',
+        message: `无法连接 xAI API: ${err.message}` +
+          (proxyInfo ? `（经代理 ${proxyInfo}，可在浏览器访问 /api/diag 查看详情）` : '（直连，可在浏览器访问 /api/diag 查看详情）'),
+      },
     });
   }
 

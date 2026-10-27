@@ -20,6 +20,11 @@
 
 * { box-sizing: border-box; margin: 0; padding: 0; }
 
+/* 关键: 作者样式里的 display:grid/flex 会覆盖浏览器对 [hidden] 的默认 display:none,
+   导致 hidden 属性失效(弹窗关不掉、模式切换区块不隐藏)。
+   这里强制让 [hidden] 优先, 全站统一生效。 */
+[hidden] { display: none !important; }
+
 html, body { height: 100%; }
 
 body {

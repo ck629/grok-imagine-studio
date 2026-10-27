@@ -44,10 +44,17 @@ function shouldBypassProxy(hostname) {
 }
 
 function getProxyFor(targetUrl) {
-  const raw = pickProxyEnv();
+  let raw = pickProxyEnv();
   if (!raw) return null;
+  // 容错: 省略协议时默认按 http 代理处理 (如 127.0.0.1:7890)
+  if (!/^[a-z0-9+.-]+:\/\//i.test(raw)) raw = `http://${raw}`;
   if (shouldBypassProxy(targetUrl.hostname)) return null;
-  const proxyUrl = new URL(raw);
+  let proxyUrl;
+  try {
+    proxyUrl = new URL(raw);
+  } catch {
+    throw new Error(`代理地址格式无法解析: ${raw} (示例: http://127.0.0.1:7890 或 socks5h://127.0.0.1:1080)`);
+  }
   const proto = proxyUrl.protocol.replace(':', '');
   if (!['http', 'https', 'socks5', 'socks5h'].includes(proto)) {
     throw new Error(`不支持的代理协议: ${proxyUrl.protocol} (支持 http/https/socks5/socks5h)`);
@@ -75,7 +82,7 @@ function withTimeout(promise, ms, message) {
 function connectViaHttpProxy(proxy, target) {
   return new Promise((resolve, reject) => {
     const port = target.port || (target.protocol === 'https:' ? 443 : 80);
-    const socket = net.connect(proxy.port, proxy.hostname);
+    let socket = net.connect(proxy.port, proxy.hostname);
     socket.once('error', reject);
     // 代理主动断开(如对端不可达)时及时失败, 而不是挂到超时
     socket.once('close', () => reject(new Error('代理连接被关闭')));
@@ -84,7 +91,7 @@ function connectViaHttpProxy(proxy, target) {
       reject(new Error('连接代理服务器超时'));
     });
 
-    socket.once('connect', () => {
+    const begin = () => {
       const authHeader = proxy.auth
         ? `Proxy-Authorization: Basic ${Buffer.from(`${proxy.auth.user}:${proxy.auth.pass}`).toString('base64')}\r\n`
         : '';
@@ -92,23 +99,33 @@ function connectViaHttpProxy(proxy, target) {
         `CONNECT ${target.hostname}:${port} HTTP/1.1\r\n` +
         `Host: ${target.hostname}:${port}\r\n${authHeader}\r\n`
       );
-    });
 
-    let buffer = Buffer.alloc(0);
-    const onData = (chunk) => {
-      buffer = Buffer.concat([buffer, chunk]);
-      const end = buffer.indexOf('\r\n\r\n');
-      if (end === -1) return;
-      socket.removeListener('data', onData);
-      const head = buffer.slice(0, end).toString();
-      if (!/^HTTP\/1\.[01] 200/.test(head)) {
-        socket.destroy();
-        return reject(new Error(`代理 CONNECT 失败: ${head.split('\r\n')[0]}`));
-      }
-      socket.setTimeout(0);
-      resolve(socket);
+      let buffer = Buffer.alloc(0);
+      const onData = (chunk) => {
+        buffer = Buffer.concat([buffer, chunk]);
+        const end = buffer.indexOf('\r\n\r\n');
+        if (end === -1) return;
+        socket.removeListener('data', onData);
+        const head = buffer.slice(0, end).toString();
+        if (!/^HTTP\/1\.[01] 200/.test(head)) {
+          socket.destroy();
+          return reject(new Error(`代理 CONNECT 失败: ${head.split('\r\n')[0]}`));
+        }
+        socket.setTimeout(0);
+        resolve(socket);
+      };
+      socket.on('data', onData);
     };
-    socket.on('data', onData);
+
+    if (proxy.proto === 'https') {
+      // 代理本身走 TLS (https:// 代理)
+      socket.once('connect', () => {
+        socket = tls.connect({ socket, servername: proxy.hostname }, begin);
+        socket.once('error', reject);
+      });
+    } else {
+      socket.once('connect', begin);
+    }
   });
 }
 
@@ -243,16 +260,29 @@ async function proxyFetch(urlString, { method = 'GET', headers = {}, body = null
 
   return new Promise((resolve, reject) => {
     const lib = isHttps ? https : http;
-    // 代理模式下始终通过已建立的隧道(CONNECT/SOCKS)访问目标, 直连时按默认方式
+
+    // 代理模式: 用一次性 Agent 把已建好的隧道 socket 交给请求
+    // 注意: 不能用 agent:false + options.createConnection —— Node 在这种情况下会忽略
+    // createConnection 而直连目标, 导致隧道被绕过(表现为"CONNECT 成功但请求失败")
+    let agentOpt;
+    if (socket) {
+      const Base = isHttps ? https.Agent : http.Agent;
+      const tunnelAgent = new Base({ keepAlive: false, maxSockets: 1 });
+      tunnelAgent.createConnection = (opts, cb) => {
+        cb(null, socket);
+        return undefined;
+      };
+      agentOpt = tunnelAgent;
+    }
+
     const options = {
       hostname: target.hostname,
       port: target.port || (isHttps ? 443 : 80),
       path: `${target.pathname}${target.search}`,
       method,
       headers: { ...headers, Host: target.host },
-      agent: false,
     };
-    if (socket) options.createConnection = () => socket;
+    if (agentOpt) options.agent = agentOpt;
 
     const req = lib.request(options, (res) => {
       clearTimeout(overallTimer);
