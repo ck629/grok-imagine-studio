@@ -1,0 +1,19 @@
+[Unit]
+Description=Grok Imagine Studio - xAI Imagine API WebUI
+Documentation=file://__WORKDIR__/README.md
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=__WORKDIR__
+ExecStart=__NODE__ __WORKDIR__/server.js
+Restart=always
+RestartSec=3
+# .env 由 server.js 自身加载，无需 EnvironmentFile
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=grok-imagine-studio
+
+[Install]
+WantedBy=__WANTED_BY__

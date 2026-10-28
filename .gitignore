@@ -3,3 +3,6 @@
 
 node_modules/
 npm-debug.log
+
+# 参数记忆（上次使用的模型/参数）
+data/

@@ -84,6 +84,51 @@ const PROXY_ROUTES = new Set([
 // /api/videos/{request_id} 与 /api/images/{request_id} 轮询 (GET, 动态段)
 const POLL_ROUTE = /^GET \/api\/(videos|images)\/[\w-]+$/;
 
+/* ---------- 参数持久化 (跨设备记忆上一次的使用参数) ----------
+ * 存于项目内 data/prefs.json, 同一服务地址下的所有设备共享
+ * 仅接受白名单键 + 标量值, 防止写入任意内容
+ */
+const DATA_DIR = path.join(__dirname, 'data');
+const PREFS_FILE = path.join(DATA_DIR, 'prefs.json');
+const PREF_KEYS = new Set([
+  'mode',
+  'imageModel', 'videoModel',
+  'imageAspect', 'videoAspect',
+  'imageRes', 'videoRes',
+  'quality', 'n', 'format',
+  'duration', 'durationExt',
+  'deferred', 'generateAudio', 'userId',
+]);
+
+function sanitizePrefs(input) {
+  const out = {};
+  if (!input || typeof input !== 'object' || Array.isArray(input)) return out;
+  for (const [k, v] of Object.entries(input)) {
+    if (!PREF_KEYS.has(k)) continue;
+    if (!['string', 'number', 'boolean'].includes(typeof v)) continue;
+    if (typeof v === 'string' && v.length > 200) continue;
+    if (typeof v === 'number' && !Number.isFinite(v)) continue;
+    out[k] = v;
+  }
+  return out;
+}
+
+async function readPrefs() {
+  try {
+    const raw = await fs.readFile(PREFS_FILE, 'utf8');
+    return sanitizePrefs(JSON.parse(raw));
+  } catch {
+    return {};
+  }
+}
+
+async function writePrefs(prefs) {
+  await fs.mkdir(DATA_DIR, { recursive: true });
+  const tmp = `${PREFS_FILE}.tmp`;
+  await fs.writeFile(tmp, JSON.stringify(prefs, null, 2), 'utf8');
+  await fs.rename(tmp, PREFS_FILE);
+}
+
 function sendJson(res, status, payload) {
   const body = JSON.stringify(payload);
   res.writeHead(status, {
@@ -141,6 +186,28 @@ async function handleApi(req, res, url) {
       proxy: describeProxy(),
       version: '1.0.0',
     });
+  }
+
+  // 参数记忆: 读取 / 保存上一次使用的参数 (跨设备共享)
+  if (route === 'GET /api/prefs') {
+    return sendJson(res, 200, await readPrefs());
+  }
+  if (route === 'POST /api/prefs') {
+    let body;
+    try {
+      body = await readJsonBody(req);
+    } catch (err) {
+      return sendJson(res, err.status || 400, { error: { code: 'bad_request', message: err.message } });
+    }
+    const prefs = sanitizePrefs(body);
+    try {
+      await writePrefs(prefs);
+      return sendJson(res, 200, { ok: true, prefs });
+    } catch (err) {
+      return sendJson(res, 500, {
+        error: { code: 'prefs_write_failed', message: `参数保存失败: ${err.message}` },
+      });
+    }
   }
 
   // 连通性自检: 经当前代理配置探测上游, 无需 Key

@@ -101,13 +101,13 @@
 
       <!-- 语音参考（文生视频 / 图生视频） -->
       <div class="panel-block" id="audiosBlock" hidden>
-        <label class="field-label">语音参考 <span class="hint-inline">最多 3 条，每条 ≤15 秒</span></label>
+        <label class="field-label">语音参考 <span class="hint-inline">最多 3 条</span></label>
+        <input type="text" id="voiceIdInput" placeholder="预设 voice_id（如 ara、eve），逗号分隔" spellcheck="false" />
         <div class="dropzone" id="audioDropzone">
           <input type="file" id="audioInput" accept="audio/*" multiple hidden />
-          <span>拖拽 / 点击上传音频（声音身份）</span>
+          <span>上传自定义音频（需官方授权，普通账号请用 voice_id）</span>
         </div>
         <div id="audioList"></div>
-        <input type="text" id="voiceIdInput" placeholder="或使用预设 voice_id（如 ara），逗号分隔多个" spellcheck="false" />
       </div>
 
       <div class="panel-block">
@@ -123,15 +123,16 @@
       </div>
 
       <div class="grid-2" id="geomGrid">
-        <div class="panel-block">
+        <div class="panel-block" id="aspectBlock">
           <label class="field-label" for="aspectSelect">宽高比</label>
           <select id="aspectSelect"></select>
         </div>
-        <div class="panel-block">
+        <div class="panel-block" id="resBlock">
           <label class="field-label" for="resSelect">分辨率</label>
           <select id="resSelect"></select>
         </div>
       </div>
+      <div class="hint" id="geomHint" hidden></div>
 
       <div class="panel-block" id="qualityBlock" hidden>
         <label class="field-label" for="qualitySelect">质量 <span class="hint-inline">quality，档位来自模型价目表</span></label>
@@ -146,6 +147,7 @@
       <div class="panel-block" id="durationBlock" hidden>
         <label class="field-label" for="durationInput"><span id="durationLabel">时长</span> <span class="hint-inline" id="durationVal">8 秒</span></label>
         <input type="range" id="durationInput" min="1" max="15" step="1" value="8" />
+        <div class="hint" id="durationHint" hidden></div>
       </div>
 
       <div class="panel-block" id="formatBlock" hidden>

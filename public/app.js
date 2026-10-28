@@ -15,39 +15,39 @@ const MODES = {
   t2i: {
     label: '文生图', kind: 'image', api: '/api/images/generations', btn: '生成图像',
     imageUpload: null, keyframes: false, videoSource: false, refs: false, audios: false,
-    aspect: true, n: true, duration: null, format: true, quality: true, promptRequired: true,
+    aspect: true, resolution: true, n: true, duration: null, format: true, quality: true, promptRequired: true,
     placeholder: '描述你想生成的画面…\n例如：一只机械风格的水母漂浮在霓虹城市上空，电影感光效，超高细节',
   },
   edit: {
     label: '图片编辑', kind: 'image', api: '/api/images/edits', btn: '开始编辑',
     imageUpload: { max: 5, label: '参考图（最多 5 张）', rule: '多图编辑时可在提示词里用 <IMAGE_0>、<IMAGE_1> 指代各图' },
     keyframes: false, videoSource: false, refs: false, audios: false,
-    aspect: true, n: true, duration: null, format: true, quality: true, promptRequired: true,
+    aspect: true, resolution: true, n: true, duration: null, format: true, quality: true, promptRequired: true,
     placeholder: '描述要做的修改…\n例如：把背景换成黄昏的海滩，保留人物姿态和光影方向',
   },
   t2v: {
     label: '文生视频', kind: 'video', api: '/api/videos/generations', btn: '生成视频',
     imageUpload: null, keyframes: false, videoSource: false, refs: true, audios: true, lastFrame: true,
-    aspect: true, n: false, duration: { min: 1, max: 15, def: 8 }, format: false, promptRequired: true,
+    aspect: true, resolution: true, n: false, duration: { min: 1, max: 15, def: 8 }, format: false, promptRequired: true,
     placeholder: '描述镜头：场景、运动、氛围…\n例如：航拍镜头缓缓推近雪山之巅，云海翻涌，日落金光洒在雪坡上',
   },
   i2v: {
     label: '图生视频', kind: 'video', api: '/api/videos/generations', btn: '生成视频',
     imageUpload: { max: 1, label: '首帧图片', rule: '作为视频首帧，PNG / JPG / WebP' },
     keyframes: true, videoSource: false, refs: true, audios: true, lastFrame: true,
-    aspect: true, n: false, duration: { min: 1, max: 15, def: 8 }, format: false, promptRequired: false,
+    aspect: false, resolution: true, n: false, duration: { min: 1, max: 15, def: 8 }, format: false, promptRequired: false,
     placeholder: '描述这张画面的动态（可留空，仅按图片生成）…\n例如：镜头缓慢推近，头发随风飘动，背景虚化光斑流动',
   },
   vedit: {
     label: '视频编辑', kind: 'video', api: '/api/videos/edits', btn: '编辑视频',
     imageUpload: null, keyframes: false, videoSource: { duration: false }, refs: false, audios: false,
-    aspect: false, n: false, duration: null, format: false, promptRequired: true,
+    aspect: false, resolution: false, n: false, duration: null, format: false, promptRequired: true,
     placeholder: '描述要做的修改…\n例如：给画面添加大雪，保持人物动作和镜头不变',
   },
   vext: {
     label: '视频延展', kind: 'video', api: '/api/videos/extensions', btn: '延展视频',
     imageUpload: null, keyframes: false, videoSource: { duration: true }, refs: false, audios: false,
-    aspect: false, n: false, duration: { min: 2, max: 10, def: 6 }, format: false, promptRequired: true,
+    aspect: false, resolution: false, n: false, duration: { min: 2, max: 10, def: 6 }, format: false, promptRequired: true,
     placeholder: '描述接下来发生什么…\n例如：镜头缓缓拉远，露出城市天际线全景',
   },
 };
@@ -88,11 +88,90 @@ const state = {
     vedit: { videoUrl: '', videoData: null, videoName: '' },
     vext: { videoUrl: '', videoData: null, videoName: '' },
   },
+  prefs: {}, // 上次使用的参数（服务端持久化，跨设备共享）
   generating: false,
 };
 
 function md() {
   return state.modeData[state.mode] || {};
+}
+
+/* ---------- 参数记忆（服务端 + localStorage 兜底） ---------- */
+
+const LS_PREFS = 'gis.prefs';
+
+function readLocalPrefs() {
+  try {
+    return JSON.parse(localStorage.getItem(LS_PREFS) || '{}') || {};
+  } catch {
+    return {};
+  }
+}
+
+function collectPrefs() {
+  const cfg = currentModeCfg();
+  const p = {
+    mode: state.mode,
+    imageModel: state.selectedModel.image || '',
+    videoModel: state.selectedModel.video || '',
+    n: Math.min(10, Math.max(1, Number($('nInput').value) || 1)),
+    format: $('formatSelect').value,
+    deferred: $('deferredToggle').checked,
+    generateAudio: $('generateAudioToggle').checked,
+    userId: $('userIdInput').value.trim(),
+  };
+
+  // 质量只在图像模式可见，避免切到视频模式时把已记住的档位清空
+  if (cfg.quality) p.quality = $('qualitySelect').disabled ? '' : $('qualitySelect').value;
+
+  if (cfg.aspect) {
+    if (cfg.kind === 'image') p.imageAspect = $('aspectSelect').value;
+    else p.videoAspect = $('aspectSelect').value;
+  }
+  if (cfg.resolution) {
+    if (cfg.kind === 'image') p.imageRes = $('resSelect').value;
+    else p.videoRes = $('resSelect').value;
+  }
+  if (cfg.duration) {
+    const v = Number($('durationInput').value);
+    if (state.mode === 'vext') p.durationExt = v;
+    else p.duration = v;
+  }
+  return p;
+}
+
+let prefsTimer = null;
+function schedulePrefsSave() {
+  clearTimeout(prefsTimer);
+  prefsTimer = setTimeout(savePrefs, 400);
+}
+
+async function savePrefs() {
+  const merged = { ...state.prefs, ...collectPrefs() };
+  state.prefs = merged;
+  try {
+    localStorage.setItem(LS_PREFS, JSON.stringify(merged));
+  } catch {
+    /* 隐私模式等场景忽略 */
+  }
+  try {
+    await api('/api/prefs', { method: 'POST', body: merged });
+  } catch {
+    /* 服务端不可用时仅保留本地 */
+  }
+}
+
+function applyStoredPrefs(prefs) {
+  state.prefs = { ...prefs };
+  if (prefs.imageModel) state.selectedModel.image = prefs.imageModel;
+  if (prefs.videoModel) state.selectedModel.video = prefs.videoModel;
+
+  const n = Number(prefs.n);
+  if (n >= 1) $('nInput').value = Math.min(10, Math.max(1, n));
+  if (prefs.format === 'url' || prefs.format === 'b64_json') $('formatSelect').value = prefs.format;
+  if (typeof prefs.deferred === 'boolean') $('deferredToggle').checked = prefs.deferred;
+  if (typeof prefs.generateAudio === 'boolean') $('generateAudioToggle').checked = prefs.generateAudio;
+  if (prefs.userId) $('userIdInput').value = prefs.userId;
 }
 
 /* ---------- 工具 ---------- */
@@ -146,6 +225,100 @@ function checkAudioDuration(dataUrl) {
   });
 }
 
+/* ---------- 错误归一化 ---------- */
+
+// xAI 的错误体存在多种形态，统一抽出 code / message
+// 1) { error: { code, message } }   2) { code, error: "message" }
+// 3) { error: "message" }           4) { message }
+function normalizeApiError(payload, status) {
+  let code = '';
+  let message = '';
+
+  if (payload && typeof payload === 'object') {
+    const err = payload.error;
+    if (err && typeof err === 'object') {
+      code = err.code || err.type || '';
+      message = err.message || '';
+    } else if (typeof err === 'string') {
+      message = err;
+    }
+    if (!code && typeof payload.code === 'string') code = payload.code;
+    if (!message && typeof payload.message === 'string') message = payload.message;
+    if (!message && typeof payload.detail === 'string') message = payload.detail;
+  } else if (typeof payload === 'string') {
+    message = payload;
+  }
+
+  return {
+    code: code || (status ? `HTTP ${status}` : '未知错误'),
+    message: message || (status ? `请求失败（HTTP ${status}）` : '未知错误'),
+  };
+}
+
+// 上游错误码的中文解读（来自官方文档 VideoErrorCode 等）
+const ERROR_HINTS = {
+  invalid_argument: '参数不被接受：时长/分辨率/尺寸超出限制、提示词过长、输入素材不合规，或内容被审核拦截',
+  permission_denied: 'API Key 或所在团队无此模型/能力的权限',
+  failed_precondition: '当前模型不支持该操作（例如旧版视频模型不支持尾帧/关键帧、编辑/延展），或该分辨率不可用',
+  service_unavailable: '上游暂时过载，稍后重试即可',
+  internal_error: '上游内部错误，可重试；持续失败请携带 request_id 联系 xAI',
+  unauthenticated: 'API Key 无效或未提供',
+  expired: '任务结果已过期（deferred 结果保留 24 小时），需重新生成',
+};
+
+const STATUS_HINTS = {
+  400: '请求参数有误或模型不可用，请检查模型、时长、分辨率等设置',
+  401: 'API Key 无效或未提供，请在右上角设置中检查',
+  403: '当前 Key 无该资源的访问权限',
+  404: '模型不存在，或该 Key 无权访问',
+  429: '触发限流，请稍后重试',
+  500: '上游服务错误，可重试',
+  502: '本机服务无法连接上游（代理/网络问题，可访问 /api/diag 自检）',
+  503: '上游暂不可用，请稍后重试',
+};
+
+function hintForError(code, status, message = '') {
+  // 先看具体消息（更精确），再看通用错误码，最后看 HTTP 状态
+  const text = String(message || '').toLowerCase();
+  if (/api key|credential|unauthorized|无凭证/.test(text)) {
+    return 'API Key 无效、过期或未提供，请在右上角设置中检查';
+  }
+  if (/moderat|policy|safety|审核/.test(text)) {
+    return '内容未通过审核，请调整提示词或参考图后重试';
+  }
+  if (/permission|not have access|无权限/.test(text)) {
+    return '当前 Key 无该模型的访问权限，可能需要在 xAI 控制台开通';
+  }
+
+  const key = String(code || '').split(':')[0]; // unauthenticated:no-credentials -> unauthenticated
+  if (ERROR_HINTS[key]) return ERROR_HINTS[key];
+
+  return (status ? STATUS_HINTS[status] : '') || '';
+}
+
+// 统一的失败描述对象，供提示条与失败卡片共用
+function describeError(err) {
+  const code = err?.code || (err?.status ? `HTTP ${err.status}` : 'ERROR');
+  const message = err?.message || '未知错误';
+  return {
+    code,
+    message,
+    hint: err?.hint || hintForError(code, err?.status, message),
+    requestId: err?.requestId || '',
+    raw: err?.payload ?? null,
+  };
+}
+
+// 生成带 code/status 的 Error，便于上层展示
+function makeApiError(norm, status, payload, requestId) {
+  const err = new Error(norm.message);
+  err.code = norm.code;
+  err.status = status;
+  err.payload = payload;
+  err.requestId = requestId || '';
+  return err;
+}
+
 /* ---------- API 封装 ---------- */
 
 async function api(path, { method = 'GET', body } = {}) {
@@ -166,9 +339,7 @@ async function api(path, { method = 'GET', body } = {}) {
   }
 
   if (!res.ok) {
-    throw new Error(
-      data?.error?.message || data?.error?.code || data?.message || `HTTP ${res.status}`
-    );
+    throw makeApiError(normalizeApiError(data, res.status), res.status, data);
   }
   return data;
 }
@@ -201,20 +372,34 @@ function renderQualityOptions() {
 
   const prev = sel.value;
   sel.innerHTML = '';
+
+  // auto 为官方默认值：生图按 low 计费、编辑按 medium 计费
+  const autoOpt = document.createElement('option');
+  autoOpt.value = 'auto';
+  autoOpt.textContent = 'auto（默认）';
+  sel.appendChild(autoOpt);
+
   for (const q of qualities) {
     const opt = document.createElement('option');
     opt.value = q;
     opt.textContent = q;
     sel.appendChild(opt);
   }
+
   sel.disabled = false;
-  sel.value = qualities.includes(prev) ? prev : qualities.includes('medium') ? 'medium' : qualities[0];
+  const candidates = ['auto', ...qualities];
+  sel.value = candidates.includes(state.prefs.quality)
+    ? state.prefs.quality
+    : candidates.includes(prev)
+      ? prev
+      : 'auto';
 }
 
 function currentPriceEntry(model) {
   if (!model) return null;
   if (Array.isArray(model.pricing) && model.pricing.length) {
-    const q = $('qualitySelect').value;
+    const selected = $('qualitySelect').value;
+    const q = selected === 'auto' ? (state.mode === 'edit' ? 'medium' : 'low') : selected;
     const r = $('resSelect').value;
     return (
       model.pricing.find((p) => (!q || p.quality === q) && (!r || p.resolution === r)) ||
@@ -308,7 +493,8 @@ function renderPriceHint() {
   if (entry) {
     const usd = usdFromTicks(entry.price_per_image);
     const parts = [];
-    if (entry.quality) parts.push(`quality=${entry.quality}`);
+    const isAuto = $('qualitySelect').value === 'auto';
+    if (entry.quality) parts.push(isAuto ? `auto→${entry.quality}` : `quality=${entry.quality}`);
     if (entry.resolution) parts.push(entry.resolution);
     text = `$${usd.toFixed(3)} / 张${parts.length ? ` · ${parts.join(' · ')}` : ''}`;
   } else if (typeof model.image_price === 'number') {
@@ -324,7 +510,10 @@ function renderPriceHint() {
 function setMode(mode) {
   state.mode = mode;
   document.querySelectorAll('.mode-tab').forEach((b) => {
-    b.classList.toggle('active', b.dataset.mode === mode);
+    const active = b.dataset.mode === mode;
+    b.classList.toggle('active', active);
+    // 窄屏下模式条可横向滚动时，确保当前模式可见
+    if (active) b.scrollIntoView({ block: 'nearest', inline: 'center' });
   });
 
   const cfg = currentModeCfg();
@@ -347,31 +536,56 @@ function setMode(mode) {
   $('audiosBlock').hidden = !cfg.audios;
   $('audioToggleRow').hidden = !(cfg.kind === 'video' && cfg.api.endsWith('/videos/generations'));
 
-  // 几何参数（仅生成类端点支持）
-  $('geomGrid').hidden = !cfg.aspect;
+  // 几何参数：宽高比 / 分辨率分开控制
+  // 图生视频的输出宽高比由首帧图片决定，API 会忽略 aspect_ratio（官方文档明确），故隐藏该项
+  const showGeom = cfg.aspect || cfg.resolution;
+  $('geomGrid').hidden = !showGeom;
+  $('geomGrid').classList.toggle('single', !(cfg.aspect && cfg.resolution));
+  $('aspectBlock').hidden = !cfg.aspect;
+  $('resBlock').hidden = !cfg.resolution;
+
   if (cfg.aspect) {
     const aspectValues = isImage ? IMAGE_ASPECT : VIDEO_ASPECT;
-    const prev = $('aspectSelect').value;
-    fillSelect($('aspectSelect'), aspectValues, aspectValues.includes(prev) ? prev : (isImage ? 'auto' : '16:9'));
-    const resValues = isImage ? IMAGE_RES : VIDEO_RES;
-    const prevRes = $('resSelect').value;
-    fillSelect($('resSelect'), resValues, resValues.includes(prevRes) ? prevRes : (isImage ? '1k' : '720p'));
+    const prefAspect = isImage ? state.prefs.imageAspect : state.prefs.videoAspect;
+    fillSelect($('aspectSelect'), aspectValues,
+      aspectValues.includes(prefAspect) ? prefAspect : (isImage ? 'auto' : '16:9'));
   }
+  if (cfg.resolution) {
+    const resValues = isImage ? IMAGE_RES : VIDEO_RES;
+    const prefRes = isImage ? state.prefs.imageRes : state.prefs.videoRes;
+    fillSelect($('resSelect'), resValues,
+      resValues.includes(prefRes) ? prefRes : (isImage ? '1k' : '720p'));
+  }
+
+  const geomHintText =
+    mode === 'i2v' ? '输出宽高比自动跟随首帧图片（API 会忽略 aspect_ratio）' : '';
+  $('geomHint').textContent = geomHintText;
+  $('geomHint').hidden = !geomHintText;
 
   $('nBlock').hidden = !cfg.n;
   $('formatBlock').hidden = !cfg.format;
   $('qualityBlock').hidden = !cfg.quality;
 
-  // 时长
+  // 时长：延展与生成分开记忆
   const d = cfg.duration;
   $('durationBlock').hidden = !d;
   if (d) {
     const input = $('durationInput');
+    const stored = mode === 'vext' ? state.prefs.durationExt : state.prefs.duration;
+    const val = Math.min(d.max, Math.max(d.min, Number(stored) || d.def));
     input.min = d.min;
     input.max = d.max;
-    input.value = d.def;
-    $('durationVal').textContent = `${d.def} 秒`;
+    input.value = val;
+    $('durationVal').textContent = `${val} 秒`;
     $('durationLabel').textContent = mode === 'vext' ? '延展片段时长' : '时长';
+
+    // 官方约束随模型变化，界面不写死模型名，只做提示
+    const durationHintText =
+      mode === 'vext'
+        ? '输出总时长 = 原视频时长 + 该值（2–10 秒）'
+        : '上限随模型不同：1.5 系 15 秒 / 旧版 10 秒';
+    $('durationHint').textContent = durationHintText;
+    $('durationHint').hidden = !durationHintText;
   }
 
   // 高级参数
@@ -651,12 +865,14 @@ function buildImageBody(model, prompt) {
 
 function buildVideoGenBody(model, prompt) {
   const data = md();
+  const cfg = currentModeCfg();
   const body = {
     model,
-    duration: Number($('durationInput').value) || currentModeCfg().duration.def,
-    aspect_ratio: $('aspectSelect').value,
-    resolution: $('resSelect').value,
+    duration: Number($('durationInput').value) || cfg.duration.def,
   };
+  // 仅在该模式真正支持时才发送，避免把隐藏控件的旧值带出去
+  if (cfg.aspect) body.aspect_ratio = $('aspectSelect').value;
+  if (cfg.resolution) body.resolution = $('resSelect').value;
   if (prompt) body.prompt = prompt;
 
   if (state.mode === 'i2v' && data.images.length) {
@@ -711,6 +927,13 @@ function buildVideoEditBody(model, prompt) {
 
 /* ---------- 生成入口 ---------- */
 
+// 窄屏下结果区在折叠线下方，生成后自动滚过去，避免"点了没反应"的错觉
+function maybeScrollToResults() {
+  if (window.innerWidth > 980) return;
+  const grid = $('resultsGrid');
+  grid.scrollIntoView({ behavior: 'smooth', block: 'start' });
+}
+
 async function onGenerate() {
   if (state.generating) return;
   if (!hasKey()) {
@@ -757,11 +980,14 @@ async function onGenerate() {
   }
 
   try {
+    // 记住本次使用的参数（含模型选择）
+    schedulePrefsSave();
     if (cfg.kind === 'image') await generateImage(model, prompt);
     else if (state.mode === 'vedit' || state.mode === 'vext') await submitVideoJob(cfg.api, buildVideoEditBody(model, prompt));
     else await submitVideoJob(cfg.api, buildVideoGenBody(model, prompt));
   } catch (err) {
-    toast(`请求失败：${err.message}`, 'error', 8000);
+    const info = describeError(err);
+    toast(`请求失败 [${info.code}]：${info.message}`, 'error', 9000);
     setGenerating(false);
   }
 }
@@ -778,10 +1004,21 @@ function setGenerating(flag) {
 async function generateImage(model, prompt) {
   setGenerating(true);
   const body = buildImageBody(model, prompt);
-  const data = await api(currentModeCfg().api, { method: 'POST', body });
+  const placeholder = createProgressCard({ model, type: '图像' });
+  maybeScrollToResults();
+
+  let data;
+  try {
+    data = await api(currentModeCfg().api, { method: 'POST', body });
+  } catch (err) {
+    failCard(placeholder, describeError(err));
+    setGenerating(false);
+    throw err;
+  }
 
   if (data?.request_id) {
     // deferred 异步模式：轮询 GET /api/images/{request_id}
+    removeCard(placeholder);
     const card = createProgressCard({ model, requestId: data.request_id, type: '图像' });
     toast('已提交异步图像任务（deferred）');
     setGenerating(false);
@@ -790,8 +1027,16 @@ async function generateImage(model, prompt) {
   }
 
   const items = data?.data || [];
-  if (!items.length) throw new Error('接口未返回任何图像');
+  if (!items.length) {
+    const err = new Error('接口返回成功但没有任何图像，可能被内容审核拦截');
+    err.code = 'empty_result';
+    err.payload = data;
+    failCard(placeholder, describeError(err));
+    setGenerating(false);
+    throw err;
+  }
 
+  removeCard(placeholder);
   const cost = formatCost(data.usage);
   for (const item of items) {
     const src = item.b64_json
@@ -816,12 +1061,18 @@ async function pollDeferredImage(requestId, card, model, n) {
         continue;
       }
       if (!res.ok) {
-        const err = await res.json().catch(() => ({}));
-        throw new Error(err?.error?.message || `HTTP ${res.status}`);
+        const payload = await res.json().catch(() => ({}));
+        throw makeApiError(normalizeApiError(payload, res.status), res.status, payload, requestId);
       }
 
       const data = await res.json();
-      if (data.error) throw new Error(data.error.message || '图像生成失败');
+      if (data.error) {
+        const err = new Error(data.error.message || '图像生成失败');
+        err.code = data.error.code || 'failed';
+        err.payload = data.error;
+        err.requestId = requestId;
+        throw err;
+      }
 
       const items = data.data || [];
       const cost = formatCost(data.usage);
@@ -836,8 +1087,9 @@ async function pollDeferredImage(requestId, card, model, n) {
       return;
     }
   } catch (err) {
-    failCard(card, err.message);
-    toast(`异步图像任务失败：${err.message}`, 'error', 8000);
+    const info = describeError(err);
+    failCard(card, { ...info, requestId });
+    toast(`异步图像任务失败 [${info.code}]：${info.message}`, 'error', 9000);
   }
 }
 
@@ -845,11 +1097,30 @@ async function pollDeferredImage(requestId, card, model, n) {
 
 async function submitVideoJob(endpoint, body) {
   const model = body.model;
-  const started = await api(endpoint, { method: 'POST', body });
+
+  let started;
+  try {
+    started = await api(endpoint, { method: 'POST', body });
+  } catch (err) {
+    // 提交阶段就失败（无权限/参数非法/模型不可用），也要落一张失败卡片
+    const card = createProgressCard({ model, type: '视频' });
+    failCard(card, describeError(err));
+    maybeScrollToResults();
+    throw err;
+  }
+
   const requestId = started?.request_id;
-  if (!requestId) throw new Error('接口未返回 request_id');
+  if (!requestId) {
+    const err = new Error('接口未返回 request_id');
+    err.code = 'empty_result';
+    err.payload = started;
+    const card = createProgressCard({ model, type: '视频' });
+    failCard(card, describeError(err));
+    throw err;
+  }
 
   const card = createProgressCard({ model, requestId, type: '视频' });
+  maybeScrollToResults();
   toast('视频任务已提交，生成中…（通常需要几分钟）');
   setGenerating(false); // 释放按钮，允许并行任务
 
@@ -864,10 +1135,16 @@ async function pollVideo(requestId, card, model) {
 
       if (data.status === 'done') {
         if (!data.video?.respect_moderation && !data.video?.url) {
-          throw new Error('生成内容未通过审核（respect_moderation=false）');
+          const err = new Error('生成内容未通过内容审核（respect_moderation=false）');
+          err.code = 'moderation_blocked';
+          throw err;
         }
         const url = data.video?.url;
-        if (!url) throw new Error('完成但未返回视频 URL');
+        if (!url) {
+          const err = new Error('任务完成但未返回视频 URL');
+          err.code = 'empty_result';
+          throw err;
+        }
         finishVideoCard(card, {
           url,
           model,
@@ -877,14 +1154,29 @@ async function pollVideo(requestId, card, model) {
         toast('视频生成完成', 'success');
         return;
       }
+
       if (data.status === 'failed' || data.status === 'expired') {
-        throw new Error(data.error?.message || `视频生成${data.status}`);
+        // 直接展示结构化失败信息（含官方 error.code），不再抛异常绕一圈
+        const info = {
+          code: data.error?.code || data.status,
+          message:
+            data.error?.message ||
+            (data.status === 'expired' ? '任务结果已过期，需重新生成' : '视频生成失败'),
+          hint: hintForError(data.error?.code || data.status, null, data.error?.message),
+          requestId,
+          raw: data.error || data,
+        };
+        failCard(card, info);
+        toast(`视频任务失败 [${info.code}]：${info.message}`, 'error', 9000);
+        return;
       }
+
       updateProgress(card, typeof data.progress === 'number' ? data.progress : null);
     }
   } catch (err) {
-    failCard(card, err.message);
-    toast(`视频任务失败：${err.message}`, 'error', 8000);
+    const info = describeError(err);
+    failCard(card, { ...info, requestId });
+    toast(`视频任务失败 [${info.code}]：${info.message}`, 'error', 9000);
   }
 }
 
@@ -1022,14 +1314,30 @@ function finishVideoCard(card, { url, model, cost, duration }) {
   });
 }
 
-function failCard(card, message) {
+function failCard(card, info) {
   if (!card.isConnected) return;
+  const d = typeof info === 'string' ? { code: 'ERROR', message: info } : info;
+  const rawStr =
+    d.raw && typeof d.raw === 'object' ? JSON.stringify(d.raw, null, 2) : '';
+
   card.innerHTML = `
-    <div class="progress-card" style="color: var(--danger);">
+    <div class="progress-card fail">
       <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
-      <div class="progress-label" style="color: var(--danger);">任务失败</div>
-      <div class="hint" style="max-width: 90%;">${message}</div>
+      <div class="fail-title">任务失败</div>
+      <div class="err-code" title="错误码">${escapeHtml(d.code || 'ERROR')}</div>
+      <div class="fail-msg">${escapeHtml(d.message || '未知错误')}</div>
+      ${d.hint ? `<div class="hint fail-hint">${escapeHtml(d.hint)}</div>` : ''}
+      ${d.requestId ? `<div class="hint mono">request_id: ${escapeHtml(d.requestId)}</div>` : ''}
+      ${rawStr ? `<details class="raw"><summary>原始响应</summary><pre>${escapeHtml(rawStr)}</pre></details>` : ''}
     </div>`;
+}
+
+function escapeHtml(str) {
+  return String(str)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;');
 }
 
 /* ---------- 设置 ---------- */
@@ -1118,7 +1426,10 @@ function bindDropzone(zoneEl, onFiles) {
 function bindEvents() {
   $('modeTabs').addEventListener('click', (e) => {
     const btn = e.target.closest('.mode-tab');
-    if (btn) setMode(btn.dataset.mode);
+    if (btn) {
+      setMode(btn.dataset.mode);
+      schedulePrefsSave();
+    }
   });
 
   $('prompt').addEventListener('input', (e) => {
@@ -1212,10 +1523,22 @@ function bindEvents() {
     state.selectedModel[modality()] = e.target.value;
     renderQualityOptions();
     renderPriceHint();
+    schedulePrefsSave();
   });
   // 分辨率/质量变化时刷新价格提示
   $('resSelect').addEventListener('change', renderPriceHint);
   $('qualitySelect').addEventListener('change', renderPriceHint);
+
+  // 参数变更 → 记忆上一次使用的值（400ms 防抖，写服务端 + 本地）
+  [
+    'aspectSelect', 'resSelect', 'qualitySelect', 'nInput',
+    'durationInput', 'formatSelect', 'deferredToggle',
+    'generateAudioToggle', 'userIdInput',
+  ].forEach((id) => {
+    const el = $(id);
+    el.addEventListener('change', schedulePrefsSave);
+    el.addEventListener('input', schedulePrefsSave);
+  });
   $('refreshModels').addEventListener('click', () => {
     if (!hasKey()) {
       openSettings();
@@ -1234,12 +1557,14 @@ function bindEvents() {
       $('deferredToggle').checked = false;
       toast('deferred 仅支持 url 返回格式，已自动关闭', 'info');
     }
+    schedulePrefsSave();
   });
   $('deferredToggle').addEventListener('change', (e) => {
     if (e.target.checked && $('formatSelect').value !== 'url') {
       $('formatSelect').value = 'url';
       toast('已将返回格式切换为 url（deferred 仅支持 url）', 'info');
     }
+    schedulePrefsSave();
   });
 
   $('userIdInput').addEventListener('change', (e) => {
@@ -1274,8 +1599,19 @@ function bindEvents() {
 
 async function init() {
   bindEvents();
-  $('userIdInput').value = localStorage.getItem(LS_USER) || '';
-  setMode('t2i');
+
+  // 参数记忆：优先服务端（跨设备共享），不可用时回退本地缓存
+  let prefs = readLocalPrefs();
+  try {
+    const server = await api('/api/prefs');
+    if (server && typeof server === 'object' && Object.keys(server).length) prefs = server;
+  } catch {
+    /* 服务端不可用，用本地 */
+  }
+  applyStoredPrefs(prefs);
+  if (!prefs.userId) $('userIdInput').value = localStorage.getItem(LS_USER) || '';
+
+  setMode(MODES[prefs.mode] ? prefs.mode : 't2i');
 
   try {
     const health = await api('/api/health');
